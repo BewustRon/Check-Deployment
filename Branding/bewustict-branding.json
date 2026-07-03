@@ -1,0 +1,21 @@
+{
+  "customBranding": {
+    "companyName": "Bewust ICT",
+    "productName": "Bewust ICT Security Check",
+    "logoUrl": "https://bewustict.nl/wp-content/uploads/2025/10/Logo-zonder-beeldberk.svg",
+    "primaryColor": "#63B1BC",
+    "supportEmail": "noc@bewustict.nl",
+    "supportUrl": "https://www.bewustict.nl",
+    "privacyPolicyUrl": "https://bewustict.nl/privacy_verklaring/",
+    "aboutUrl": "https://www.bewustict.nl"
+  },
+  "cippReporting": {
+    "enabled": false,
+    "serverUrl": "https://cipp.bewustcloud.nl",
+    "tenantId": ""
+  },
+  "notes": [
+    "CIPP Reporting staat standaard uit totdat tenantId per klant is bepaald.",
+    "De branding wordt via browser enterprise policies uitgerold, niet via een Check portal."
+  ]
+}
