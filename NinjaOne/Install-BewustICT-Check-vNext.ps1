@@ -1,9 +1,10 @@
 <#
 .SYNOPSIS
-    vNext installer for Bewust ICT Security Check.
+    Installs and configures Bewust ICT Security Check for Microsoft Edge.
 
 .DESCRIPTION
-    Adds automatic tenant discovery using dsregcmd. This script is intended to replace the first Install script after testing.
+    Beta installer used by Bootstrap.ps1 and NinjaOne. Edge is the primary supported browser in this beta.
+    Chrome support remains parameterized but is not production-ready yet.
 #>
 
 [CmdletBinding()]
@@ -18,11 +19,14 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+$ScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+$RepoRoot = Split-Path -Parent $ScriptRoot
+$LogDirectory = 'C:\ProgramData\BewustICT\Check\Logs'
+$LogFile = Join-Path $LogDirectory 'Install-BewustICT-Check-vNext.log'
+
 $ExtensionId = 'knepjpocdagponkonnbggpcnhnaikajg'
 $EdgeUpdateUrl = 'https://edge.microsoft.com/extensionwebstorebase/v1/crx'
 $ChromeUpdateUrl = 'https://clients2.google.com/service/update2/crx'
-$LogDirectory = 'C:\ProgramData\BewustICT\Check'
-$LogFile = Join-Path $LogDirectory 'Install-BewustICT-Check-vNext.log'
 
 function Write-Log {
     param([string]$Message, [string]$Level = 'INFO')
@@ -32,24 +36,15 @@ function Write-Log {
     Write-Output $line
 }
 
-function Get-TenantFromDsreg {
-    $result = [ordered]@{ TenantId = ''; TenantName = ''; Source = 'none' }
-    if (-not (Get-Command dsregcmd.exe -ErrorAction SilentlyContinue)) { return [pscustomobject]$result }
-
-    $raw = & dsregcmd.exe /status 2>$null
-    foreach ($line in $raw) {
-        if ($line -match '^\s*TenantId\s*:\s*(.+)$') { $result.TenantId = $Matches[1].Trim() }
-        if ($line -match '^\s*TenantName\s*:\s*(.+)$') { $result.TenantName = $Matches[1].Trim() }
+function Import-CommonModule {
+    param([string]$Name)
+    $path = Join-Path $RepoRoot "Common\$Name"
+    if (Test-Path $path) {
+        Import-Module $path -Force
+        Write-Log "Imported module: $Name"
+    } else {
+        Write-Log "Module not found, using built-in fallback: $Name" 'WARN'
     }
-
-    if (-not [string]::IsNullOrWhiteSpace($result.TenantId)) {
-        $result.Source = 'dsregcmd TenantId'
-    }
-    elseif (-not [string]::IsNullOrWhiteSpace($result.TenantName)) {
-        $result.Source = 'dsregcmd TenantName'
-    }
-
-    return [pscustomobject]$result
 }
 
 function Ensure-Key { param([string]$Path) if (-not (Test-Path $Path)) { New-Item -Path $Path -Force | Out-Null } }
@@ -57,23 +52,29 @@ function Set-Str { param([string]$Path,[string]$Name,[string]$Value) Ensure-Key 
 function Set-Dword { param([string]$Path,[string]$Name,[int]$Value) Ensure-Key $Path; New-ItemProperty -Path $Path -Name $Name -Value $Value -PropertyType DWord -Force | Out-Null }
 function Remove-Key { param([string]$Path) if (Test-Path $Path) { Write-Log "Removing key: $Path"; Remove-Item -Path $Path -Recurse -Force } }
 
-function Configure-Browser {
-    param([ValidateSet('Edge','Chrome')][string]$Browser)
-
-    if ($Browser -eq 'Edge') {
-        $PolicyRoot = 'HKLM:\SOFTWARE\Policies\Microsoft\Edge'
-        $UpdateUrl = $EdgeUpdateUrl
-    } else {
-        $PolicyRoot = 'HKLM:\SOFTWARE\Policies\Google\Chrome'
-        $UpdateUrl = $ChromeUpdateUrl
+function Get-TenantFromDsregFallback {
+    $result = [ordered]@{ TenantId = ''; TenantName = ''; Source = 'none' }
+    if (-not (Get-Command dsregcmd.exe -ErrorAction SilentlyContinue)) { return [pscustomobject]$result }
+    $raw = & dsregcmd.exe /status 2>$null
+    foreach ($line in $raw) {
+        if ($line -match '^\s*TenantId\s*:\s*(.+)$') { $result.TenantId = $Matches[1].Trim() }
+        if ($line -match '^\s*TenantName\s*:\s*(.+)$') { $result.TenantName = $Matches[1].Trim() }
     }
+    if (-not [string]::IsNullOrWhiteSpace($result.TenantId)) { $result.Source = 'dsregcmd TenantId' }
+    elseif (-not [string]::IsNullOrWhiteSpace($result.TenantName)) { $result.Source = 'dsregcmd TenantName' }
+    return [pscustomobject]$result
+}
 
+function Configure-EdgePolicy {
+    $PolicyRoot = 'HKLM:\SOFTWARE\Policies\Microsoft\Edge'
     $ExtPath = Join-Path $PolicyRoot "ExtensionSettings\$ExtensionId"
     $PolicyPath = Join-Path $PolicyRoot "3rdparty\extensions\$ExtensionId\policy"
     $BrandingPath = Join-Path $PolicyPath 'customBranding'
 
+    Write-Log 'Configuring Microsoft Edge policy.'
+
     Set-Str $ExtPath 'installation_mode' 'force_installed'
-    Set-Str $ExtPath 'update_url' $UpdateUrl
+    Set-Str $ExtPath 'update_url' $EdgeUpdateUrl
     Set-Str $ExtPath 'toolbar_state' 'force_shown'
 
     Set-Dword $PolicyPath 'showNotifications' 1
@@ -103,32 +104,76 @@ function Configure-Browser {
     Set-Str $BrandingPath 'primaryColor' '#63B1BC'
     Set-Str $BrandingPath 'logoUrl' 'https://bewustict.nl/wp-content/uploads/2025/10/Logo-zonder-beeldberk.svg'
 
-    Write-Log "$Browser configured."
+    Write-Log 'Microsoft Edge policy configured.'
+}
+
+function Configure-ChromePolicyBeta {
+    $PolicyRoot = 'HKLM:\SOFTWARE\Policies\Google\Chrome'
+    $ExtPath = Join-Path $PolicyRoot "ExtensionSettings\$ExtensionId"
+    $PolicyPath = Join-Path $PolicyRoot "3rdparty\extensions\$ExtensionId\policy"
+    $BrandingPath = Join-Path $PolicyPath 'customBranding'
+
+    Write-Log 'Configuring Google Chrome policy beta.' 'WARN'
+
+    Set-Str $ExtPath 'installation_mode' 'force_installed'
+    Set-Str $ExtPath 'update_url' $ChromeUpdateUrl
+    Set-Str $ExtPath 'toolbar_state' 'force_shown'
+
+    Set-Dword $PolicyPath 'showNotifications' 1
+    Set-Dword $PolicyPath 'enableValidPageBadge' 0
+    Set-Dword $PolicyPath 'enablePageBlocking' 1
+    Set-Dword $PolicyPath 'enableDebugLogging' 0
+    Set-Dword $PolicyPath 'updateInterval' 1
+    Set-Str $PolicyPath 'customRulesUrl' ''
+
+    Set-Str $BrandingPath 'companyName' 'Bewust ICT'
+    Set-Str $BrandingPath 'productName' $ProductName
+    Set-Str $BrandingPath 'companyURL' 'https://www.bewustict.nl'
+    Set-Str $BrandingPath 'supportEmail' 'noc@bewustict.nl'
+    Set-Str $BrandingPath 'primaryColor' '#63B1BC'
+    Set-Str $BrandingPath 'logoUrl' 'https://bewustict.nl/wp-content/uploads/2025/10/Logo-zonder-beeldberk.svg'
 }
 
 try {
-    Write-Log 'Starting vNext deployment.'
+    Write-Log 'Starting vNext Edge beta deployment.'
+
+    Import-CommonModule 'TenantDiscovery.psm1'
+    Import-CommonModule 'Validation.psm1'
 
     if ($EnableCippReporting -and $AutoDiscoverTenant -and [string]::IsNullOrWhiteSpace($CippTenantId)) {
-        $tenant = Get-TenantFromDsreg
-        if (-not [string]::IsNullOrWhiteSpace($tenant.TenantId)) {
-            $CippTenantId = $tenant.TenantId
-            Write-Log "Auto discovered CIPP tenant identifier: $CippTenantId ($($tenant.Source))"
-        } elseif (-not [string]::IsNullOrWhiteSpace($tenant.TenantName)) {
-            $CippTenantId = $tenant.TenantName
-            Write-Log "Auto discovered CIPP tenant identifier: $CippTenantId ($($tenant.Source))"
+        if (Get-Command Get-BICTTenantIdentifier -ErrorAction SilentlyContinue) {
+            $tenant = Get-BICTTenantIdentifier -Preferred Auto
+            $CippTenantId = $tenant.Identifier
+            Write-Log "Tenant discovery result: $CippTenantId ($($tenant.Source))"
         } else {
+            $tenant = Get-TenantFromDsregFallback
+            if (-not [string]::IsNullOrWhiteSpace($tenant.TenantId)) { $CippTenantId = $tenant.TenantId }
+            elseif (-not [string]::IsNullOrWhiteSpace($tenant.TenantName)) { $CippTenantId = $tenant.TenantName }
+            Write-Log "Tenant discovery fallback result: $CippTenantId ($($tenant.Source))"
+        }
+
+        if ([string]::IsNullOrWhiteSpace($CippTenantId)) {
             Write-Log 'CIPP Reporting enabled, but tenant could not be auto discovered.' 'WARN'
         }
     }
 
     Remove-Key "HKLM:\SOFTWARE\Policies\Microsoft\Edge\3rdparty\extensions\$ExtensionId"
-    Remove-Key "HKLM:\SOFTWARE\Policies\Google\Chrome\3rdparty\extensions\$ExtensionId"
+    Configure-EdgePolicy
 
-    Configure-Browser -Browser Edge
-    if ($ConfigureChrome) { Configure-Browser -Browser Chrome }
+    if ($ConfigureChrome) {
+        Remove-Key "HKLM:\SOFTWARE\Policies\Google\Chrome\3rdparty\extensions\$ExtensionId"
+        Configure-ChromePolicyBeta
+    }
 
-    Write-Log 'vNext deployment finished successfully.'
+    if (Get-Command Test-BICTEdgePolicy -ErrorAction SilentlyContinue) {
+        $validation = Test-BICTEdgePolicy -RequireCippReporting:$EnableCippReporting
+        if (-not $validation.Compliant) {
+            $validation.Failures | ForEach-Object { Write-Log "Validation failure: $_" 'ERROR' }
+            exit 1
+        }
+    }
+
+    Write-Log 'vNext Edge beta deployment finished successfully.'
     exit 0
 } catch {
     Write-Log "vNext deployment failed: $($_.Exception.Message)" 'ERROR'
