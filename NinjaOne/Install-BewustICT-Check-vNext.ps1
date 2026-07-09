@@ -28,6 +28,18 @@ $ExtensionId = 'knepjpocdagponkonnbggpcnhnaikajg'
 $EdgeUpdateUrl = 'https://edge.microsoft.com/extensionwebstorebase/v1/crx'
 $ChromeUpdateUrl = 'https://clients2.google.com/service/update2/crx'
 
+$Branding = [pscustomobject]@{
+    CompanyName      = 'Bewust ICT'
+    ProductName      = $ProductName
+    CompanyUrl       = 'https://www.bewustict.nl'
+    SupportEmail     = 'noc@bewustict.nl'
+    SupportUrl       = 'https://bewustict.nl/support/'
+    PrivacyPolicyUrl = 'https://bewustict.nl/privacy_verklaring/'
+    AboutUrl         = 'https://www.bewustict.nl'
+    PrimaryColor     = '#63B1BC'
+    LogoUrl          = 'https://raw.githubusercontent.com/BewustRon/Check-Deployment/main/Assets/Bewust-ICT-beeldmerk-wit.svg'
+}
+
 function Write-Log {
     param([string]$Message, [string]$Level = 'INFO')
     if (-not (Test-Path $LogDirectory)) { New-Item -Path $LogDirectory -ItemType Directory -Force | Out-Null }
@@ -51,6 +63,7 @@ function Ensure-Key { param([string]$Path) if (-not (Test-Path $Path)) { New-Ite
 function Set-Str { param([string]$Path,[string]$Name,[string]$Value) Ensure-Key $Path; New-ItemProperty -Path $Path -Name $Name -Value $Value -PropertyType String -Force | Out-Null }
 function Set-Dword { param([string]$Path,[string]$Name,[int]$Value) Ensure-Key $Path; New-ItemProperty -Path $Path -Name $Name -Value $Value -PropertyType DWord -Force | Out-Null }
 function Remove-Key { param([string]$Path) if (Test-Path $Path) { Write-Log "Removing key: $Path"; Remove-Item -Path $Path -Recurse -Force } }
+function Remove-RegValue { param([string]$Path,[string]$Name) if (Test-Path $Path) { Remove-ItemProperty -Path $Path -Name $Name -ErrorAction SilentlyContinue } }
 
 function Get-TenantFromDsregFallback {
     $result = [ordered]@{ TenantId = ''; TenantName = ''; Source = 'none' }
@@ -65,17 +78,8 @@ function Get-TenantFromDsregFallback {
     return [pscustomobject]$result
 }
 
-function Configure-EdgePolicy {
-    $PolicyRoot = 'HKLM:\SOFTWARE\Policies\Microsoft\Edge'
-    $ExtPath = Join-Path $PolicyRoot "ExtensionSettings\$ExtensionId"
-    $PolicyPath = Join-Path $PolicyRoot "3rdparty\extensions\$ExtensionId\policy"
-    $BrandingPath = Join-Path $PolicyPath 'customBranding'
-
-    Write-Log 'Configuring Microsoft Edge policy.'
-
-    Set-Str $ExtPath 'installation_mode' 'force_installed'
-    Set-Str $ExtPath 'update_url' $EdgeUpdateUrl
-    Set-Str $ExtPath 'toolbar_state' 'force_shown'
+function Set-CheckPolicyValues {
+    param([string]$PolicyPath,[string]$BrandingPath)
 
     Set-Dword $PolicyPath 'showNotifications' 1
     Set-Dword $PolicyPath 'enableValidPageBadge' 0
@@ -94,15 +98,30 @@ function Configure-EdgePolicy {
         Set-Str $PolicyPath 'cippTenantId' ''
     }
 
-    Set-Str $BrandingPath 'companyName' 'Bewust ICT'
-    Set-Str $BrandingPath 'productName' $ProductName
-    Set-Str $BrandingPath 'companyURL' 'https://www.bewustict.nl'
-    Set-Str $BrandingPath 'supportEmail' 'noc@bewustict.nl'
-    Set-Str $BrandingPath 'supportUrl' 'https://www.bewustict.nl'
-    Set-Str $BrandingPath 'privacyPolicyUrl' 'https://bewustict.nl/privacy_verklaring/'
-    Set-Str $BrandingPath 'aboutUrl' 'https://www.bewustict.nl'
-    Set-Str $BrandingPath 'primaryColor' '#63B1BC'
-    Set-Str $BrandingPath 'logoUrl' 'https://bewustict.nl/wp-content/uploads/2025/10/Logo-zonder-beeldberk.svg'
+    Set-Str $BrandingPath 'companyName' $Branding.CompanyName
+    Set-Str $BrandingPath 'productName' $Branding.ProductName
+    Set-Str $BrandingPath 'companyURL' $Branding.CompanyUrl
+    Set-Str $BrandingPath 'supportEmail' $Branding.SupportEmail
+    Set-Str $BrandingPath 'supportUrl' $Branding.SupportUrl
+    Set-Str $BrandingPath 'privacyPolicyUrl' $Branding.PrivacyPolicyUrl
+    Set-Str $BrandingPath 'aboutUrl' $Branding.AboutUrl
+    Set-Str $BrandingPath 'primaryColor' $Branding.PrimaryColor
+    Set-Str $BrandingPath 'logoUrl' $Branding.LogoUrl
+}
+
+function Configure-EdgePolicy {
+    $PolicyRoot = 'HKLM:\SOFTWARE\Policies\Microsoft\Edge'
+    $ExtPath = Join-Path $PolicyRoot "ExtensionSettings\$ExtensionId"
+    $PolicyPath = Join-Path $PolicyRoot "3rdparty\extensions\$ExtensionId\policy"
+    $BrandingPath = Join-Path $PolicyPath 'customBranding'
+
+    Write-Log 'Configuring Microsoft Edge policy.'
+
+    Set-Str $ExtPath 'installation_mode' 'force_installed'
+    Set-Str $ExtPath 'update_url' $EdgeUpdateUrl
+    Remove-RegValue $ExtPath 'toolbar_state'
+
+    Set-CheckPolicyValues -PolicyPath $PolicyPath -BrandingPath $BrandingPath
 
     Write-Log 'Microsoft Edge policy configured.'
 }
@@ -117,21 +136,9 @@ function Configure-ChromePolicyBeta {
 
     Set-Str $ExtPath 'installation_mode' 'force_installed'
     Set-Str $ExtPath 'update_url' $ChromeUpdateUrl
-    Set-Str $ExtPath 'toolbar_state' 'force_shown'
+    Remove-RegValue $ExtPath 'toolbar_state'
 
-    Set-Dword $PolicyPath 'showNotifications' 1
-    Set-Dword $PolicyPath 'enableValidPageBadge' 0
-    Set-Dword $PolicyPath 'enablePageBlocking' 1
-    Set-Dword $PolicyPath 'enableDebugLogging' 0
-    Set-Dword $PolicyPath 'updateInterval' 1
-    Set-Str $PolicyPath 'customRulesUrl' ''
-
-    Set-Str $BrandingPath 'companyName' 'Bewust ICT'
-    Set-Str $BrandingPath 'productName' $ProductName
-    Set-Str $BrandingPath 'companyURL' 'https://www.bewustict.nl'
-    Set-Str $BrandingPath 'supportEmail' 'noc@bewustict.nl'
-    Set-Str $BrandingPath 'primaryColor' '#63B1BC'
-    Set-Str $BrandingPath 'logoUrl' 'https://bewustict.nl/wp-content/uploads/2025/10/Logo-zonder-beeldberk.svg'
+    Set-CheckPolicyValues -PolicyPath $PolicyPath -BrandingPath $BrandingPath
 }
 
 try {
