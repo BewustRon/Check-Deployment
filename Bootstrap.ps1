@@ -7,7 +7,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$BootstrapVersion = [version]'0.2.0'
+$ProgressPreference = 'SilentlyContinue'
+$BootstrapVersion = [version]'0.3.0'
 $Root = 'C:\ProgramData\BewustICT\Check'
 $Work = Join-Path $Root 'Current'
 $Backup = Join-Path $Root 'Previous'
@@ -28,7 +29,30 @@ function Write-BootstrapLog {
 
 function Get-VersionMetadata {
     param([string]$Uri)
-    return Invoke-RestMethod -Uri $Uri -UseBasicParsing
+    Invoke-RestMethod -Uri $Uri -UseBasicParsing
+}
+
+function Test-GoogleChromeInstalled {
+    $paths = @(
+        (Join-Path $env:ProgramFiles 'Google\Chrome\Application\chrome.exe'),
+        (Join-Path ${env:ProgramFiles(x86)} 'Google\Chrome\Application\chrome.exe'),
+        'C:\Users\*\AppData\Local\Google\Chrome\Application\chrome.exe'
+    )
+
+    foreach ($path in $paths) {
+        if ($path -and (Test-Path $path)) { return $true }
+    }
+
+    $registryPaths = @(
+        'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe',
+        'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe'
+    )
+
+    foreach ($registryPath in $registryPaths) {
+        if (Test-Path $registryPath) { return $true }
+    }
+
+    return $false
 }
 
 try {
@@ -85,19 +109,34 @@ try {
     if (-not (Test-Path $Install)) { throw "Install script not found: $Install" }
     if (-not (Test-Path $Test)) { throw "Test script not found: $Test" }
 
-    $installArgs = @()
-    if ($EnableCippReporting) { $installArgs += '-EnableCippReporting' }
-    if (-not [string]::IsNullOrWhiteSpace($CippTenantId)) { $installArgs += @('-CippTenantId', $CippTenantId) }
-    if ($ConfigureChrome) { $installArgs += '-ConfigureChrome' }
+    $chromeDetected = Test-GoogleChromeInstalled
+    $configureChromeNow = $ConfigureChrome -or $chromeDetected
+
+    Write-BootstrapLog 'Detected browser: Microsoft Edge.'
+    if ($configureChromeNow) {
+        Write-BootstrapLog 'Detected browser: Google Chrome. Chrome will be configured.'
+    }
+    else {
+        Write-BootstrapLog 'Google Chrome not detected. Chrome configuration will be skipped.'
+    }
+
+    $installParams = @{}
+    if ($EnableCippReporting) { $installParams.EnableCippReporting = $true }
+    if (-not [string]::IsNullOrWhiteSpace($CippTenantId)) { $installParams.CippTenantId = $CippTenantId }
+    if ($configureChromeNow) { $installParams.ConfigureChrome = $true }
 
     Write-BootstrapLog "Running install script: $Install"
-    & $Install @installArgs
+    & $Install @installParams
     $installExit = $LASTEXITCODE
     Write-BootstrapLog "Install script exit code: $installExit"
     if ($installExit -ne 0) { exit $installExit }
 
+    $testParams = @{}
+    if ($configureChromeNow) { $testParams.RequireChrome = $true }
+    if ($EnableCippReporting) { $testParams.RequireCippReporting = $true }
+
     Write-BootstrapLog "Running validation script: $Test"
-    & $Test
+    & $Test @testParams
     $testExit = $LASTEXITCODE
     Write-BootstrapLog "Validation exit code: $testExit"
 
