@@ -15,8 +15,6 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$ScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
-$RepoRoot = Split-Path -Parent $ScriptRoot
 $LogDirectory = 'C:\ProgramData\BewustICT\Check\Logs'
 $LogFile = Join-Path $LogDirectory 'Install-BewustICT-Check-vNext.log'
 
@@ -34,33 +32,101 @@ $Branding = [pscustomobject]@{
 
 function Write-Log {
     param([string]$Message, [string]$Level = 'INFO')
-    if (-not (Test-Path $LogDirectory)) { New-Item -Path $LogDirectory -ItemType Directory -Force | Out-Null }
+    if (-not (Test-Path $LogDirectory)) {
+        New-Item -Path $LogDirectory -ItemType Directory -Force | Out-Null
+    }
     $line = "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') [$Level] $Message"
     Add-Content -Path $LogFile -Value $line
     Write-Output $line
 }
 
-function Ensure-Key { param([string]$Path) if (-not (Test-Path $Path)) { New-Item -Path $Path -Force | Out-Null } }
-function Set-Str { param([string]$Path,[string]$Name,[string]$Value) Ensure-Key $Path; New-ItemProperty -Path $Path -Name $Name -Value $Value -PropertyType String -Force | Out-Null }
-function Set-Dword { param([string]$Path,[string]$Name,[int]$Value) Ensure-Key $Path; New-ItemProperty -Path $Path -Name $Name -Value $Value -PropertyType DWord -Force | Out-Null }
-function Remove-Key { param([string]$Path) if (Test-Path $Path) { Write-Log "Removing key: $Path"; Remove-Item -Path $Path -Recurse -Force } }
-function Remove-RegValue { param([string]$Path,[string]$Name) if (Test-Path $Path) { Remove-ItemProperty -Path $Path -Name $Name -ErrorAction SilentlyContinue } }
+function Ensure-Key {
+    param([string]$Path)
+    if (-not (Test-Path $Path)) {
+        New-Item -Path $Path -Force | Out-Null
+    }
+}
+
+function Set-Str {
+    param([string]$Path, [string]$Name, [string]$Value)
+    Ensure-Key $Path
+    New-ItemProperty -Path $Path -Name $Name -Value $Value -PropertyType String -Force | Out-Null
+}
+
+function Set-Dword {
+    param([string]$Path, [string]$Name, [int]$Value)
+    Ensure-Key $Path
+    New-ItemProperty -Path $Path -Name $Name -Value $Value -PropertyType DWord -Force | Out-Null
+}
+
+function Remove-Key {
+    param([string]$Path)
+    if (Test-Path $Path) {
+        Write-Log "Removing key: $Path"
+        Remove-Item -Path $Path -Recurse -Force
+    }
+}
+
+function Remove-RegValue {
+    param([string]$Path, [string]$Name)
+    if (Test-Path $Path) {
+        Remove-ItemProperty -Path $Path -Name $Name -ErrorAction SilentlyContinue
+    }
+}
+
+function Get-BICTBrowserConfig {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateSet('Edge', 'Chrome')]
+        [string]$Browser
+    )
+
+    if ($Browser -eq 'Edge') {
+        return [pscustomobject]@{
+            BrowserName = 'Microsoft Edge'
+            PolicyRoot  = 'HKLM:\SOFTWARE\Policies\Microsoft\Edge'
+            ExtensionId = 'knepjpocdagponkonnbggpcnhnaikajg'
+            UpdateUrl   = 'https://edge.microsoft.com/extensionwebstorebase/v1/crx'
+        }
+    }
+
+    return [pscustomobject]@{
+        BrowserName = 'Google Chrome'
+        PolicyRoot  = 'HKLM:\SOFTWARE\Policies\Google\Chrome'
+        ExtensionId = 'benimdeioplgkhanklclahllklceahbe'
+        UpdateUrl   = 'https://clients2.google.com/service/update2/crx'
+    }
+}
 
 function Get-TenantFromDsregFallback {
     $result = [ordered]@{ TenantId = ''; TenantName = ''; Source = 'none' }
-    if (-not (Get-Command dsregcmd.exe -ErrorAction SilentlyContinue)) { return [pscustomobject]$result }
+    if (-not (Get-Command dsregcmd.exe -ErrorAction SilentlyContinue)) {
+        return [pscustomobject]$result
+    }
+
     $raw = & dsregcmd.exe /status 2>$null
     foreach ($line in $raw) {
-        if ($line -match '^\s*TenantId\s*:\s*(.+)$') { $result.TenantId = $Matches[1].Trim() }
-        if ($line -match '^\s*TenantName\s*:\s*(.+)$') { $result.TenantName = $Matches[1].Trim() }
+        if ($line -match '^\s*TenantId\s*:\s*(.+)$') {
+            $result.TenantId = $Matches[1].Trim()
+        }
+        if ($line -match '^\s*TenantName\s*:\s*(.+)$') {
+            $result.TenantName = $Matches[1].Trim()
+        }
     }
-    if (-not [string]::IsNullOrWhiteSpace($result.TenantId)) { $result.Source = 'dsregcmd TenantId' }
-    elseif (-not [string]::IsNullOrWhiteSpace($result.TenantName)) { $result.Source = 'dsregcmd TenantName' }
+
+    if (-not [string]::IsNullOrWhiteSpace($result.TenantId)) {
+        $result.Source = 'dsregcmd TenantId'
+    }
+    elseif (-not [string]::IsNullOrWhiteSpace($result.TenantName)) {
+        $result.Source = 'dsregcmd TenantName'
+    }
+
     return [pscustomobject]$result
 }
 
 function Set-CheckPolicyValues {
-    param([string]$PolicyPath,[string]$BrandingPath)
+    param([string]$PolicyPath, [string]$BrandingPath)
 
     Set-Dword $PolicyPath 'showNotifications' 1
     Set-Dword $PolicyPath 'enableValidPageBadge' 0
@@ -73,7 +139,8 @@ function Set-CheckPolicyValues {
         Set-Dword $PolicyPath 'enableCippReporting' 1
         Set-Str $PolicyPath 'cippServerUrl' $CippServerUrl
         Set-Str $PolicyPath 'cippTenantId' $CippTenantId
-    } else {
+    }
+    else {
         Set-Dword $PolicyPath 'enableCippReporting' 0
         Set-Str $PolicyPath 'cippServerUrl' ''
         Set-Str $PolicyPath 'cippTenantId' ''
@@ -91,7 +158,11 @@ function Set-CheckPolicyValues {
 }
 
 function Configure-BrowserPolicy {
-    param([ValidateSet('Edge','Chrome')][string]$Browser)
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateSet('Edge', 'Chrome')]
+        [string]$Browser
+    )
 
     $config = Get-BICTBrowserConfig -Browser $Browser
     $extPath = Join-Path $config.PolicyRoot "ExtensionSettings\$($config.ExtensionId)"
@@ -99,8 +170,15 @@ function Configure-BrowserPolicy {
     $brandingPath = Join-Path $policyPath 'customBranding'
 
     Write-Log "Configuring $($config.BrowserName) policy."
-    Remove-Key (Join-Path $config.PolicyRoot "ExtensionSettings\$($config.ExtensionId)")
+
+    Remove-Key $extPath
     Remove-Key (Join-Path $config.PolicyRoot "3rdparty\extensions\$($config.ExtensionId)")
+
+    if ($Browser -eq 'Chrome') {
+        $legacyEdgeExtensionId = 'knepjpocdagponkonnbggpcnhnaikajg'
+        Remove-Key (Join-Path $config.PolicyRoot "ExtensionSettings\$legacyEdgeExtensionId")
+        Remove-Key (Join-Path $config.PolicyRoot "3rdparty\extensions\$legacyEdgeExtensionId")
+    }
 
     Set-Str $extPath 'installation_mode' 'force_installed'
     Set-Str $extPath 'update_url' $config.UpdateUrl
@@ -110,34 +188,98 @@ function Configure-BrowserPolicy {
     Write-Log "$($config.BrowserName) policy configured."
 }
 
+function Test-BICTBrowserPolicy {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateSet('Edge', 'Chrome')]
+        [string]$Browser,
+        [switch]$RequireCippReporting
+    )
+
+    $config = Get-BICTBrowserConfig -Browser $Browser
+    $extensionSettings = Join-Path $config.PolicyRoot "ExtensionSettings\$($config.ExtensionId)"
+    $policy = Join-Path $config.PolicyRoot "3rdparty\extensions\$($config.ExtensionId)\policy"
+    $branding = Join-Path $policy 'customBranding'
+    $failures = New-Object System.Collections.Generic.List[string]
+
+    if (-not (Test-Path $extensionSettings)) {
+        $failures.Add("Missing $Browser ExtensionSettings policy")
+    }
+    if (-not (Test-Path $policy)) {
+        $failures.Add("Missing $Browser 3rdparty policy")
+    }
+    if (-not (Test-Path $branding)) {
+        $failures.Add("Missing $Browser custom branding policy")
+    }
+
+    if ($failures.Count -eq 0) {
+        $ext = Get-ItemProperty -Path $extensionSettings
+        $pol = Get-ItemProperty -Path $policy
+        $brand = Get-ItemProperty -Path $branding
+
+        if ($ext.installation_mode -ne 'force_installed') {
+            $failures.Add("$Browser extension is not force_installed")
+        }
+        if ($ext.update_url -ne $config.UpdateUrl) {
+            $failures.Add("$Browser update URL mismatch")
+        }
+        if ($null -ne $ext.toolbar_state) {
+            $failures.Add("$Browser toolbar_state must be absent so the icon is not force-pinned")
+        }
+        if ($brand.companyName -ne 'Bewust ICT') {
+            $failures.Add("$Browser branding companyName mismatch")
+        }
+        if ($brand.productName -ne $ProductName) {
+            $failures.Add("$Browser branding productName mismatch")
+        }
+        if ($brand.primaryColor -ne '#63B1BC') {
+            $failures.Add("$Browser branding primaryColor mismatch")
+        }
+        if ($brand.supportUrl -ne 'https://bewustict.nl/support/') {
+            $failures.Add("$Browser branding supportUrl mismatch")
+        }
+        if ($brand.logoUrl -ne 'https://raw.githubusercontent.com/BewustRon/Check-Deployment/main/Assets/Bewust-ICT-beeldmerk-wit.svg') {
+            $failures.Add("$Browser branding logoUrl mismatch")
+        }
+        if ([int]$pol.enablePageBlocking -ne 1) {
+            $failures.Add("$Browser page blocking is not enabled")
+        }
+
+        if ($RequireCippReporting) {
+            if ([int]$pol.enableCippReporting -ne 1) {
+                $failures.Add("$Browser CIPP reporting is not enabled")
+            }
+            if ($pol.cippServerUrl -ne 'https://cipp.bewustcloud.nl') {
+                $failures.Add("$Browser CIPP server URL mismatch")
+            }
+            if ([string]::IsNullOrWhiteSpace($pol.cippTenantId)) {
+                $failures.Add("$Browser CIPP tenant ID is empty")
+            }
+        }
+    }
+
+    return [pscustomobject]@{
+        Browser   = $Browser
+        Compliant = ($failures.Count -eq 0)
+        Failures  = @($failures)
+    }
+}
+
 try {
     Write-Log 'Starting Bewust ICT Check deployment.'
-
-    foreach ($moduleName in @('BrowserConfig.psm1','TenantDiscovery.psm1','Validation.psm1')) {
-        $modulePath = Join-Path $RepoRoot "Common\$moduleName"
-        if (-not (Test-Path $modulePath)) {
-            throw "Required module not found: $moduleName"
-        }
-
-        Import-Module $modulePath -Force -ErrorAction Stop
-        Write-Log "Imported module: $moduleName"
-    }
-
-    if (-not (Get-Command Get-BICTBrowserConfig -ErrorAction SilentlyContinue)) {
-        throw 'BrowserConfig module loaded, but Get-BICTBrowserConfig was not exported.'
-    }
+    Write-Log 'Using embedded browser configuration and validation.'
 
     if ($EnableCippReporting -and $AutoDiscoverTenant -and [string]::IsNullOrWhiteSpace($CippTenantId)) {
-        if (Get-Command Get-BICTTenantIdentifier -ErrorAction SilentlyContinue) {
-            $tenant = Get-BICTTenantIdentifier -Preferred Auto
-            $CippTenantId = $tenant.Identifier
-            Write-Log "Tenant discovery result: $CippTenantId ($($tenant.Source))"
-        } else {
-            $tenant = Get-TenantFromDsregFallback
-            if (-not [string]::IsNullOrWhiteSpace($tenant.TenantId)) { $CippTenantId = $tenant.TenantId }
-            elseif (-not [string]::IsNullOrWhiteSpace($tenant.TenantName)) { $CippTenantId = $tenant.TenantName }
-            Write-Log "Tenant discovery fallback result: $CippTenantId ($($tenant.Source))"
+        $tenant = Get-TenantFromDsregFallback
+        if (-not [string]::IsNullOrWhiteSpace($tenant.TenantId)) {
+            $CippTenantId = $tenant.TenantId
         }
+        elseif (-not [string]::IsNullOrWhiteSpace($tenant.TenantName)) {
+            $CippTenantId = $tenant.TenantName
+        }
+
+        Write-Log "Tenant discovery result: $CippTenantId ($($tenant.Source))"
 
         if ([string]::IsNullOrWhiteSpace($CippTenantId)) {
             Write-Log 'CIPP Reporting enabled, but tenant could not be auto discovered.' 'WARN'
@@ -150,18 +292,17 @@ try {
         Configure-BrowserPolicy -Browser Chrome
     }
 
-    $edgeValidation = Test-BICTEdgePolicy -RequireCippReporting:$EnableCippReporting
-    if (-not $edgeValidation.Compliant) {
-        $edgeValidation.Failures | ForEach-Object { Write-Log "Validation failure: $_" 'ERROR' }
-        exit 1
-    }
+    $validationResults = New-Object System.Collections.Generic.List[object]
+    $validationResults.Add((Test-BICTBrowserPolicy -Browser Edge -RequireCippReporting:$EnableCippReporting))
 
     if ($ConfigureChrome) {
-        $chromeValidation = Test-BICTChromePolicy -RequireCippReporting:$EnableCippReporting
-        if (-not $chromeValidation.Compliant) {
-            $chromeValidation.Failures | ForEach-Object { Write-Log "Validation failure: $_" 'ERROR' }
-            exit 1
-        }
+        $validationResults.Add((Test-BICTBrowserPolicy -Browser Chrome -RequireCippReporting:$EnableCippReporting))
+    }
+
+    $validationFailures = @($validationResults | ForEach-Object { $_.Failures })
+    if ($validationFailures.Count -gt 0) {
+        $validationFailures | ForEach-Object { Write-Log "Validation failure: $_" 'ERROR' }
+        exit 1
     }
 
     Write-Log 'Bewust ICT Check deployment finished successfully.'
