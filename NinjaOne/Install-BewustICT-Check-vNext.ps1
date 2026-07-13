@@ -40,17 +40,6 @@ function Write-Log {
     Write-Output $line
 }
 
-function Import-CommonModule {
-    param([string]$Name)
-    $path = Join-Path $RepoRoot "Common\$Name"
-    if (Test-Path $path) {
-        Import-Module $path -Force -Global
-        Write-Log "Imported module: $Name"
-    } else {
-        throw "Required module not found: $Name"
-    }
-}
-
 function Ensure-Key { param([string]$Path) if (-not (Test-Path $Path)) { New-Item -Path $Path -Force | Out-Null } }
 function Set-Str { param([string]$Path,[string]$Name,[string]$Value) Ensure-Key $Path; New-ItemProperty -Path $Path -Name $Name -Value $Value -PropertyType String -Force | Out-Null }
 function Set-Dword { param([string]$Path,[string]$Name,[int]$Value) Ensure-Key $Path; New-ItemProperty -Path $Path -Name $Name -Value $Value -PropertyType DWord -Force | Out-Null }
@@ -124,9 +113,19 @@ function Configure-BrowserPolicy {
 try {
     Write-Log 'Starting Bewust ICT Check deployment.'
 
-    Import-CommonModule 'BrowserConfig.psm1'
-    Import-CommonModule 'TenantDiscovery.psm1'
-    Import-CommonModule 'Validation.psm1'
+    foreach ($moduleName in @('BrowserConfig.psm1','TenantDiscovery.psm1','Validation.psm1')) {
+        $modulePath = Join-Path $RepoRoot "Common\$moduleName"
+        if (-not (Test-Path $modulePath)) {
+            throw "Required module not found: $moduleName"
+        }
+
+        Import-Module $modulePath -Force -ErrorAction Stop
+        Write-Log "Imported module: $moduleName"
+    }
+
+    if (-not (Get-Command Get-BICTBrowserConfig -ErrorAction SilentlyContinue)) {
+        throw 'BrowserConfig module loaded, but Get-BICTBrowserConfig was not exported.'
+    }
 
     if ($EnableCippReporting -and $AutoDiscoverTenant -and [string]::IsNullOrWhiteSpace($CippTenantId)) {
         if (Get-Command Get-BICTTenantIdentifier -ErrorAction SilentlyContinue) {
