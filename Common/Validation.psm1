@@ -1,3 +1,5 @@
+Import-Module (Join-Path $PSScriptRoot 'BrowserConfig.psm1') -Force
+
 function Test-BICTBrowserPolicy {
     [CmdletBinding()]
     param(
@@ -7,21 +9,9 @@ function Test-BICTBrowserPolicy {
         [switch]$RequireCippReporting
     )
 
-    $extensionId = 'knepjpocdagponkonnbggpcnhnaikajg'
-    $root = if ($Browser -eq 'Edge') {
-        'HKLM:\SOFTWARE\Policies\Microsoft\Edge'
-    } else {
-        'HKLM:\SOFTWARE\Policies\Google\Chrome'
-    }
-
-    $expectedUpdateUrl = if ($Browser -eq 'Edge') {
-        'https://edge.microsoft.com/extensionwebstorebase/v1/crx'
-    } else {
-        'https://clients2.google.com/service/update2/crx'
-    }
-
-    $extensionSettings = Join-Path $root "ExtensionSettings\$extensionId"
-    $policy = Join-Path $root "3rdparty\extensions\$extensionId\policy"
+    $config = Get-BICTBrowserConfig -Browser $Browser
+    $extensionSettings = Join-Path $config.PolicyRoot "ExtensionSettings\$($config.ExtensionId)"
+    $policy = Join-Path $config.PolicyRoot "3rdparty\extensions\$($config.ExtensionId)\policy"
     $branding = Join-Path $policy 'customBranding'
     $failures = New-Object System.Collections.Generic.List[string]
 
@@ -35,7 +25,7 @@ function Test-BICTBrowserPolicy {
         $brand = Get-ItemProperty -Path $branding
 
         if ($ext.installation_mode -ne 'force_installed') { $failures.Add("$Browser extension is not force_installed") }
-        if ($ext.update_url -ne $expectedUpdateUrl) { $failures.Add("$Browser update URL mismatch") }
+        if ($ext.update_url -ne $config.UpdateUrl) { $failures.Add("$Browser update URL mismatch") }
         if ($null -ne $ext.toolbar_state) { $failures.Add("$Browser toolbar_state must be absent so the icon is not force-pinned") }
         if ($brand.companyName -ne 'Bewust ICT') { $failures.Add("$Browser branding companyName mismatch") }
         if ($brand.productName -ne 'Bewust ICT Security Check') { $failures.Add("$Browser branding productName mismatch") }
@@ -51,8 +41,9 @@ function Test-BICTBrowserPolicy {
         }
     }
 
-    return [pscustomobject]@{
+    [pscustomobject]@{
         Browser = $Browser
+        ExtensionId = $config.ExtensionId
         Compliant = ($failures.Count -eq 0)
         Failures = @($failures)
     }
