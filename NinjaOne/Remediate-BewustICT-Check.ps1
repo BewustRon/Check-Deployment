@@ -4,7 +4,7 @@
 
 .DESCRIPTION
     Designed for NinjaOne SYSTEM context. The script first runs local detection when available.
-    If remediation is needed, it downloads and runs Bootstrap.ps1 from GitHub with matching options.
+    Detection and Bootstrap both automatically include Google Chrome when it is installed.
 #>
 
 [CmdletBinding()]
@@ -25,12 +25,15 @@ try {
     if (Test-Path $Detect) {
         Write-Output 'Running compliance detection.'
 
-        $detectArgs = @()
-        if ($RequireChrome) { $detectArgs += '-RequireChrome' }
-        if ($EnableCippReporting) { $detectArgs += '-RequireCippReporting' }
+        $detectParams = @{}
+        if ($RequireChrome) { $detectParams.RequireChrome = $true }
+        if ($EnableCippReporting) { $detectParams.RequireCippReporting = $true }
 
-        & $Detect @detectArgs
-        if ($LASTEXITCODE -eq 0 -and -not $ForceUpdate) {
+        & $Detect @detectParams
+        $detectExitCode = $LASTEXITCODE
+        Write-Output "Detection exit code: $detectExitCode"
+
+        if ($detectExitCode -eq 0 -and -not $ForceUpdate) {
             Write-Output 'Device is already compliant.'
             exit 0
         }
@@ -43,16 +46,16 @@ try {
         throw 'Bootstrap download failed.'
     }
 
-    $bootstrapArgs = @()
-    if ($RequireChrome) { $bootstrapArgs += '-ConfigureChrome' }
-    if ($EnableCippReporting) { $bootstrapArgs += '-EnableCippReporting' }
+    $bootstrapParams = @{}
+    if ($RequireChrome) { $bootstrapParams.ConfigureChrome = $true }
+    if ($EnableCippReporting) { $bootstrapParams.EnableCippReporting = $true }
     if (-not [string]::IsNullOrWhiteSpace($CippTenantId)) {
-        $bootstrapArgs += @('-CippTenantId', $CippTenantId)
+        $bootstrapParams.CippTenantId = $CippTenantId
     }
-    if ($ForceUpdate) { $bootstrapArgs += '-ForceUpdate' }
+    if ($ForceUpdate) { $bootstrapParams.ForceUpdate = $true }
 
     Write-Output 'Starting Bootstrap remediation.'
-    & $TempBootstrap @bootstrapArgs
+    & $TempBootstrap @bootstrapParams
     $exitCode = $LASTEXITCODE
 
     if ($exitCode -eq 0) {
